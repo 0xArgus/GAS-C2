@@ -1,7 +1,7 @@
 /**
  * Google Apps Script C2 Redirector — PoC
  * =======================================
- * Security Research / Bug Bounty VRP Submission
+ * Security Research
  *
  * PURPOSE: Demonstrate that Google Apps Script can be weaponized as a
  *          fully functional, bidirectional C2 channel running entirely
