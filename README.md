@@ -537,12 +537,8 @@ The XOR key must be identical in all components:
 ---
 
 ## 11. Legal & Ethical Notice
-
-This repository was created exclusively for **responsible disclosure** to Google's Vulnerability Reward Program.
-
 - All testing was performed in an isolated lab environment with no real victims
 - No production systems, real credentials, or third-party data were accessed
-- The PoC code is published as part of the VRP submission to allow Google engineers to reproduce and validate the findings
 - Reproduction of this technique against systems you do not own or have explicit written permission to test is illegal and unethical
 
-*Security research must be conducted responsibly. The goal of this disclosure is to help Google improve the security of Apps Script for all users.*
+
